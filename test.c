@@ -31,23 +31,21 @@ int main(){
         printf("open log.txt failed!");
         return 0;
     }
-
+    printf("usr read\n");
     vmallocmem_in = (SegFault *)malloc(sizeof(SegFault));
-    int fd = open("/dev/extern", O_RDWR, S_IRUSR|S_IWUSR);
-    printf("%d\n", fd);
+    int fd = open("/dev/extern1", O_RDWR, S_IRUSR|S_IWUSR);
+    // printf("%d\n", fd);
     if(fd != -1){
-        printf("usr read\n");
-        while(1){
-            read(fd, vmallocmem_in, sizeof(SegFault));
+        while(!read(fd, vmallocmem_in, sizeof(SegFault))){  
             read_segfault();
             fprintf(p, "{%d,%lu,%llu}\r\n",vmallocmem_in->pcid, vmallocmem_in->address, vmallocmem_in->timestamp);
-            
         }
-        printf("read end\n");
-        close(fd);       
+        printf("read end\n");      
     }else{
         printf("wrong!!");
     }
+    close(fd);
+    free(vmallocmem_in);
     fclose(p);
     return 0;
 }
