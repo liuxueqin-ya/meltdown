@@ -18,13 +18,13 @@
  
 MODULE_LICENSE("GPL");
 
-// #define MAXNUM 8192
+// #define MAXNUM 1024*1024
 // #define MAJOR_NUM 456 //主设备号 ,没有被使用
-#define MAXNUM 8
+#define MAXNUM 50
 #define MAJOR_NUM 455 //主设备号 ,没有被使用
 
 typedef struct {
-	int pcid;
+	long pcid;
 	unsigned long address;
 	unsigned long long timestamp;
 }SegFault;
@@ -45,11 +45,12 @@ struct dev{
     struct cdev devm; //字符设备
     struct semaphore sem;
     wait_queue_head_t outq;//读等待队列,实现阻塞操作
-    wait_queue_head_t inq;//写等待队列
+    // wait_queue_head_t inq;//写等待队列
     int rflag; //读阻塞唤醒标志
     int wflag; //写阻塞唤醒标志
     // char buffer[MAXNUM+1]; //字符缓冲区
-    SegFault buffer[MAXNUM+1];//结构体缓冲区
+    // SegFault buffer[MAXNUM+1];//结构体缓冲区
+    SegFault *buffer;//结构体缓冲区
     SegFault *rd,*wr,*end; //读,写,尾指针
 }globalvar;
 static struct class *my_class;
@@ -63,40 +64,45 @@ void writesegfault(int pcid, unsigned long address, unsigned long long timestamp
 // void write_segfault(int pcid, unsigned long address, unsigned long long timestamp) {
 	printk("write_segfault\n");
     
-    printk("wflag:%d\n",globalvar.wflag);
-    if(wait_event_interruptible(globalvar.inq,globalvar.wflag!=0)) //不可写时 阻塞写进程
-    {
-        return -ERESTARTSYS;
-    }
-    printk("w5\n");
-    if(down_interruptible(&globalvar.sem)) //P 操作
-    { 
-        return -ERESTARTSYS;
+    // if(wait_event_interruptible(globalvar.inq,globalvar.wflag!=0)) //不可写时 阻塞写进程
+    // {
+    //     return -ERESTARTSYS;
+    // }
+
+    if(globalvar.wflag){
+        if(down_interruptible(&globalvar.sem)) //P 操作
+        { 
+            return -ERESTARTSYS;
+        }
+        globalvar.wr->address = address;
+        globalvar.wr->pcid = pcid;
+        globalvar.wr->timestamp = timestamp;
+
+        globalvar.wr ++;
+        
+        if(globalvar.wr == globalvar.end)
+        {
+            printk("wflag = 0");
+            globalvar.wflag =0;
+            globalvar.rflag = 1;
+            globalvar.wr = globalvar.buffer; //循环
+            wake_up_interruptible(&globalvar.outq); //唤醒读进程
+        }    
+            // globalvar.wr = globalvar.buffer; //循环
+        up(&globalvar.sem);
+        
+        // if(globalvar.wr==globalvar.rd ){
+        // // if(globalvar.wr+sizeof(SegFault)==globalvar.rd ){
+        //     printk("w2");
+        //     globalvar.wflag = 0;
+        //     globalvar.rflag = 1;
+        // }else{
+        //     globalvar.rflag = 1;
+        // }
+        // wake_up_interruptible(&globalvar.outq); //唤醒读进程
+        printk("w6\n");
     }
 
-	globalvar.wr->address = address;
-	globalvar.wr->pcid = pcid;
-	globalvar.wr->timestamp = timestamp;
-
-    globalvar.wr = globalvar.wr + sizeof(SegFault);
-    if(globalvar.wr == globalvar.end)
-        globalvar.wr = globalvar.buffer; //循环
-    up(&globalvar.sem);
-    
-    if(globalvar.wr==globalvar.rd ){
-    // if(globalvar.wr+sizeof(SegFault)==globalvar.rd ){
-        printk("w2");
-        globalvar.wflag = 0;
-        globalvar.rflag = 1;
-    // }else if(globalvar.rd+sizeof(SegFault)==globalvar.wr){
-    //     printk("w3");
-    //     globalvar.rflag = 0;
-    //     globalvar.wflag =1;
-    }else{
-        globalvar.rflag = 1;
-    }
-    wake_up_interruptible(&globalvar.outq); //唤醒读进程
-    printk("w6\n");
 }
 
 
@@ -154,9 +160,11 @@ static ssize_t globalvar_read(struct file *filp,char *buf,size_t len,loff_t *off
 {
     // printk("into read");
     printk("rflag:%d",globalvar.rflag);
-    if(wait_event_interruptible(globalvar.outq,globalvar.rflag!=0)) //不可读时 阻塞读进程
+    int temp=wait_event_interruptible(globalvar.outq,globalvar.rflag!=0);
+    
+    if(temp) //不可读时 阻塞读进程
     {
-        printk("r3");
+        printk("r3,%d", temp);
         return -ERESTARTSYS;
     }
     // printk("driver_read");
@@ -165,7 +173,6 @@ static ssize_t globalvar_read(struct file *filp,char *buf,size_t len,loff_t *off
     如果驱动程序中的某段程序对其持有的信号量释放失败的话(可能就是一次出错返回的结果),
     那么其他任何获取该信号量的尝试都将阻塞在那里。
     */
-    // if(globalvar.rflag){
     if(down_interruptible(&globalvar.sem) ) //P 操作
     {
         printk("return -1");
@@ -176,6 +183,8 @@ static ssize_t globalvar_read(struct file *filp,char *buf,size_t len,loff_t *off
     unsigned long copy_to_user(void *to, const void *from,unsigned long count);
     unsigned long copy_from_user(void *to, const void *from,unsigned long count);
     */
+
+    // len = (size_t)
     if(copy_to_user(buf,globalvar.rd,len))
     {
         printk(KERN_ALERT"copy failed\n");
@@ -186,29 +195,19 @@ static ssize_t globalvar_read(struct file *filp,char *buf,size_t len,loff_t *off
         up(&globalvar.sem);
         return -EFAULT;
     }
-    globalvar.rd = globalvar.rd + sizeof(SegFault);
+    globalvar.rd ++;
     if(globalvar.rd == globalvar.end)
+    {
         globalvar.rd = globalvar.buffer; //字符缓冲区循环
+    }    
     up(&globalvar.sem); //V 操作
-    // if(globalvar.wr+sizeof(SegFault)==globalvar.rd ){
-    //     printk("r1");
-    //     globalvar.wflag = 0;
-    //     globalvar.rflag = 1;
-    // }else if(globalvar.rd+sizeof(SegFault)==globalvar.wr){
-    // }else 
     if(globalvar.rd==globalvar.wr){
         printk("r2");
         globalvar.rflag = 0;
-        globalvar.wflag = 1;
-    }else{
-        printk("r3");
-        globalvar.wflag = 1;
+        return -1;
     }
-    wake_up_interruptible(&globalvar.inq);//唤醒写进程
+    // wake_up_interruptible(&globalvar.inq);//唤醒写进程
     return 0;
-    // }
-    // return -1;
-
 }
 // static ssize_t globalvar_write(struct file *filp,const char *buf,size_t len,loff_t *off)
 // {
@@ -259,8 +258,11 @@ static int hello_init(void)
 	int result = 0;
     int err = 0;
 	
-    // vmallocmem = (SegFault *)vmalloc(1024*sizeof(SegFault));
-
+    // vmallocmem = (SegFault *)vmalloc(MAXNUM*sizeof(SegFault));
+    globalvar.buffer = (SegFault *)vmalloc((MAXNUM+1)*sizeof(SegFault));
+    // if(!globalvar.buffer){
+    //     return -1;
+    // }
 	dev_t dev = MKDEV(major, 0);
 	if(major)
     {
@@ -286,10 +288,10 @@ static int hello_init(void)
         printk("globalvar register success\n");
         sema_init(&globalvar.sem,1); //初始化信号量
         init_waitqueue_head(&globalvar.outq); //初始化读等待队列
-        init_waitqueue_head(&globalvar.inq); //初始化写等待队列
+        // init_waitqueue_head(&globalvar.inq); //初始化写等待队列
         globalvar.rd = globalvar.buffer; //读指针
         globalvar.wr = globalvar.buffer; //写指针
-        globalvar.end = globalvar.buffer + MAXNUM*sizeof(SegFault);//缓冲区尾指针
+        globalvar.end = globalvar.buffer + MAXNUM;//缓冲区尾指针
         globalvar.rflag = 0; // 读阻塞唤醒标志置 0
         globalvar.wflag = 1; // 写阻塞唤醒标志置 1
     }
@@ -297,7 +299,7 @@ static int hello_init(void)
 	my_class = class_create(THIS_MODULE, classname);
 	//device_create创建对应的设备，省去了利用mknod命令手动创建设备节点，创建设备节点
     device_create(my_class, NULL, dev, NULL, devicename);
-    wake_up_interruptible(&globalvar.inq);//唤醒写进程
+    // wake_up_interruptible(&globalvar.inq);//唤醒写进程
 	
 	printk(KERN_ALERT "--Hello, world\n");
 	return 0;
@@ -305,7 +307,7 @@ static int hello_init(void)
 static void hello_exit(void)
 {
 	printk(KERN_ALERT "++Goodbye, cruel world\n");
-	// vfree(vmallocmem);
+	vfree(globalvar.buffer);
 	device_destroy(my_class, MKDEV(major, 0));
     class_destroy(my_class);
     cdev_del(&globalvar.devm);
@@ -314,9 +316,6 @@ static void hello_exit(void)
 }
 
 EXPORT_SYMBOL(writesegfault);
-// EXPORT_SYMBOL(write_segfault);
-
-
 
 module_init(hello_init);
 module_exit(hello_exit);

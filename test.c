@@ -2,14 +2,11 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-// #include <unistd.h>
-// #include <linux/ioctl.h>
 #include <string.h>
-// #include <errno.h>
 #include <malloc.h>
 
 typedef struct {
-	int pcid;
+	long pcid;
 	unsigned long address;
 	unsigned long long timestamp;
     
@@ -24,6 +21,10 @@ void read_segfault(void) {
 }
 
 int main(){
+    // printf("int:%d\n",sizeof(int));
+    // printf("u long:%d\n",sizeof(unsigned long));
+    // printf("u long long:%d\n",sizeof(unsigned long long));
+    // printf("segfault:%d\n", sizeof(SegFault));
 
     const char *filename = "log.txt";
     FILE *p = fopen(filename, "ab");
@@ -36,15 +37,17 @@ int main(){
     int fd = open("/dev/extern1", O_RDWR, S_IRUSR|S_IWUSR);
     // printf("%d\n", fd);
     if(fd != -1){
-        while(!read(fd, vmallocmem_in, sizeof(SegFault))){  
+        while(1){
+            read(fd, vmallocmem_in, sizeof(SegFault));
             read_segfault();
             fprintf(p, "{%d,%lu,%llu}\r\n",vmallocmem_in->pcid, vmallocmem_in->address, vmallocmem_in->timestamp);
+            fflush(p);
         }
-        printf("read end\n");      
+        printf("read end\n");  
+        close(fd);    
     }else{
         printf("wrong!!");
     }
-    close(fd);
     free(vmallocmem_in);
     fclose(p);
     return 0;
