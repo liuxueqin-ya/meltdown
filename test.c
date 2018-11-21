@@ -5,6 +5,9 @@
 #include <string.h>
 #include <malloc.h>
 
+#define RESET 0
+#define READ_UNFULL 1
+
 typedef struct {
 	long pcid;
 	unsigned long address;
@@ -35,20 +38,20 @@ int main(){
     printf("usr read\n");
     vmallocmem_in = (SegFault *)malloc(sizeof(SegFault));
     int fd = open("/dev/extern1", O_RDWR, S_IRUSR|S_IWUSR);
-    // printf("%d\n", fd);
     if(fd != -1){
-        while(1){
-            read(fd, vmallocmem_in, sizeof(SegFault));
+        // ioctl(fd, RESET);
+        while(!read(fd, vmallocmem_in, sizeof(SegFault))){
             read_segfault();
             fprintf(p, "{%d,%lu,%llu}\r\n",vmallocmem_in->pcid, vmallocmem_in->address, vmallocmem_in->timestamp);
-            fflush(p);
+            // fflush(p);
         }
-        printf("read end\n");  
+        printf("read end\n");
+        fclose(p);  
         close(fd);    
     }else{
         printf("wrong!!");
     }
     free(vmallocmem_in);
-    fclose(p);
+    
     return 0;
 }

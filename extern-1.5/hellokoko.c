@@ -22,7 +22,7 @@ static int hello_init(void)
 }
 static void hello_exit(void)
 {
-	mdelay(3000);
+	// mdelay(3000);
 	writesegfault(5, 2333, 78276);
 	writesegfault(6, 2333, 78276);
 	writesegfault(7, 3444, 89387);
@@ -64,7 +64,7 @@ static void hello_exit(void)
 	writesegfault(43, 3444, 89387);
 	writesegfault(44, 3444, 89387);
 	writesegfault(45, 2333, 78276);
-	mdelay(5000);
+	// mdelay(5000);
 	writesegfault(46, 2333, 78276);
 	writesegfault(47, 3444, 89387);
 	writesegfault(48, 3444, 89387);

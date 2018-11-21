@@ -23,6 +23,9 @@ MODULE_LICENSE("GPL");
 #define MAXNUM 50
 #define MAJOR_NUM 455 //主设备号 ,没有被使用
 
+#define RESET 0
+#define READ_UNFULL 1
+
 typedef struct {
 	long pcid;
 	unsigned long address;
@@ -70,24 +73,29 @@ void writesegfault(int pcid, unsigned long address, unsigned long long timestamp
     // }
 
     if(globalvar.wflag){
+        printk("write");
         if(down_interruptible(&globalvar.sem)) //P 操作
         { 
+            printk("error");
             return -ERESTARTSYS;
         }
         globalvar.wr->address = address;
         globalvar.wr->pcid = pcid;
         globalvar.wr->timestamp = timestamp;
 
-        globalvar.wr ++;
+        
         
         if(globalvar.wr == globalvar.end)
         {
             printk("wflag = 0");
             globalvar.wflag =0;
             globalvar.rflag = 1;
-            globalvar.wr = globalvar.buffer; //循环
+            // globalvar.wr = globalvar.buffer; //循环
+            // up(&globalvar.sem);
             wake_up_interruptible(&globalvar.outq); //唤醒读进程
-        }    
+            printk("weak up");
+        }
+        globalvar.wr ++;    
             // globalvar.wr = globalvar.buffer; //循环
         up(&globalvar.sem);
         
@@ -101,6 +109,8 @@ void writesegfault(int pcid, unsigned long address, unsigned long long timestamp
         // }
         // wake_up_interruptible(&globalvar.outq); //唤醒读进程
         printk("w6\n");
+    }else{
+        printk("w7\n");
     }
 
 }
@@ -110,9 +120,11 @@ static ssize_t globalvar_read(struct file *,char *,size_t ,loff_t *);
 // static ssize_t globalvar_write(struct file *,const char *,size_t ,loff_t *);
 static int globalvar_open(struct inode *inode,struct file *filp);
 static int globalvar_release(struct inode *inode,struct file *filp);
+static long globalvar_ioctl(struct file *, unsigned int, unsigned long);
 
 struct file_operations globalvar_fops =
 {
+    .unlocked_ioctl = globalvar_ioctl,
     //用来从设备中获取数据. 在这个位置的一个空指针导致 read 系统调用以 -EINVAL("Invalid argument") 失败. 一个非负返回值代表了成功读取的字节数( 返回值是一个 "signed size" 类型, 常常是目标平台本地的整数类型).
     .read=globalvar_read,
     //发送数据给设备. 如果 NULL, -EINVAL 返回给调用 write 系统调用的程序. 如果非负, 返回值代表成功写的字节数.
@@ -121,6 +133,7 @@ struct file_operations globalvar_fops =
     .open=globalvar_open,
     //当最后一个打开设备的用户进程执行close ()系统调用时，内核将调用驱动程序的release () 函数：release 函数的主要任务是清理未结束的输入/输出操作、释放资源、用户自定义排他标志的复位等。
     .release=globalvar_release,
+    
 };
 /*
 在大部分驱动程序中,open 应完成如下工作:
@@ -193,19 +206,34 @@ static ssize_t globalvar_read(struct file *filp,char *buf,size_t len,loff_t *off
         必须小心使用信号量。被信号量保护的数据必须是定义清晰的,并且存取这些数据的所有代码都必须首先获得信号量。
         */
         up(&globalvar.sem);
+        printk("fault!!");
         return -EFAULT;
     }
-    globalvar.rd ++;
+
+    
     if(globalvar.rd == globalvar.end)
     {
-        globalvar.rd = globalvar.buffer; //字符缓冲区循环
-    }    
-    up(&globalvar.sem); //V 操作
-    if(globalvar.rd==globalvar.wr){
-        printk("r2");
+        printk("r1");
+        globalvar.wflag = 1;
         globalvar.rflag = 0;
+        globalvar.wr = globalvar.buffer;
+        globalvar.rd = globalvar.buffer; //字符缓冲区循环
+        up(&globalvar.sem);
         return -1;
     }
+    
+    if(globalvar.rd==globalvar.wr ){
+        printk("r2");
+        globalvar.rflag = 0;
+        globalvar.rd = globalvar.buffer;
+        globalvar.wr = globalvar.buffer;
+        globalvar.wflag = 1;
+        up(&globalvar.sem);
+        return -1;
+    }
+    globalvar.rd ++;
+    up(&globalvar.sem); //V 操作
+
     // wake_up_interruptible(&globalvar.inq);//唤醒写进程
     return 0;
 }
@@ -249,8 +277,32 @@ static ssize_t globalvar_read(struct file *filp,char *buf,size_t len,loff_t *off
 //     // wake_up_interruptible(&globalvar.outq); //唤醒读进程
 //     return len;
 // }
-
-
+static long globalvar_ioctl(struct file *pfile, unsigned int cmd, unsigned long arg){
+    int err = 0;
+    printk("--hello_ioctl--");
+    
+    switch (cmd)
+    {
+        case RESET:
+            printk("  reset wr rd wflag rflag   \n");
+            globalvar.wr = globalvar.buffer;
+            globalvar.rd = globalvar.buffer;
+            globalvar.wflag = 1;
+            globalvar.rflag = 0;
+            break;
+        case READ_UNFULL:
+            printk("  read not full buffer  \n");
+            globalvar.rd = globalvar.buffer;
+            // globalvar.rd = 1;
+            globalvar.rflag = 1;
+            globalvar.wflag = 0;
+            wake_up_interruptible(&globalvar.outq);
+            break;
+        default:
+            break;
+    }
+    return err;
+}
 
 static int hello_init(void)
 {
